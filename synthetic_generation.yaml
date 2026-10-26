@@ -1,0 +1,160 @@
+# PIPELINE DEFINITION
+# Name: run-synthetic-generation
+components:
+  comp-for-loop-2:
+    dag:
+      tasks:
+        train-model:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-train-model
+          inputs:
+            artifacts:
+              input_data:
+                componentInputArtifact: pipelinechannel--open-file-output_data
+            parameters:
+              epochs:
+                componentInputParameter: pipelinechannel--loop-item-param-1
+          taskInfo:
+            name: train-model
+    inputDefinitions:
+      artifacts:
+        pipelinechannel--open-file-output_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        pipelinechannel--loop-item-param-1:
+          parameterType: NUMBER_INTEGER
+  comp-open-file:
+    executorLabel: exec-open-file
+    inputDefinitions:
+      parameters:
+        file:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        output_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-train-model:
+    executorLabel: exec-train-model
+    inputDefinitions:
+      artifacts:
+        input_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        epochs:
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      artifacts:
+        output_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-open-file:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - open_file
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'pandas'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef open_file(file: str, output_data: dsl.Output[dsl.Dataset]):\n\
+          \    import pandas as pd\n    pd.read_csv(file).to_csv(output_data.path,\
+          \ index=False)\n\n"
+        image: python:3.12
+    exec-train-model:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'pandas'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train_model(\n    epochs: int,\n    input_data: dsl.Input[dsl.Dataset],\n\
+          \    output_data: dsl.Output[dsl.Dataset]\n  ): \n    import pandas as pd\n\
+          \    from sdv.metadata import Metadata\n    from sdv.single_table import\
+          \ TVAESynthesizer\n    synthetic_data = generate_synthetic_data(data=data,\
+          \ epochs=epochs).to_csv(output_data.path, index=False)\n\n"
+        image: python:3.12
+pipelineInfo:
+  name: run-synthetic-generation
+root:
+  dag:
+    tasks:
+      for-loop-2:
+        componentRef:
+          name: comp-for-loop-2
+        dependentTasks:
+        - open-file
+        inputs:
+          artifacts:
+            pipelinechannel--open-file-output_data:
+              taskOutputArtifact:
+                outputArtifactKey: output_data
+                producerTask: open-file
+        parameterIterator:
+          itemInput: pipelinechannel--loop-item-param-1
+          items:
+            raw: '[100, 200, 300, 400]'
+        taskInfo:
+          name: for-loop-2
+      open-file:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-open-file
+        inputs:
+          parameters:
+            file:
+              runtimeValue:
+                constant: data/StudentPerformance_csv
+        taskInfo:
+          name: open-file
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.17.0
